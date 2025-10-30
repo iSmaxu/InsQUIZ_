@@ -1,0 +1,37 @@
+name: Build Android APK (Expo Local)
+
+on:
+  workflow_dispatch:  # te permite lanzarlo manualmente
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Prebuild native projects
+        run: npx expo prebuild --non-interactive
+
+      - name: Build Android APK
+        run: |
+          cd android
+          ./gradlew assembleRelease
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: InsQuiz-APK
+          path: android/app/build/outputs/apk/release/app-release.apk

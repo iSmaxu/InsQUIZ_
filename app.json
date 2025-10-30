@@ -1,18 +1,20 @@
 {
   "expo": {
     "name": "InsQUIZ",
-    "slug": "quiz-icfes-app",
+    "slug": "ins-quiz",
     "version": "1.0.0",
     "sdkVersion": "54.0.0",
     "platforms": [
       "ios",
-      "android",
-      "web"
+      "android"
     ],
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "updates": {
-      "fallbackToCacheTimeout": 0
+      "enabled": true,
+      "checkAutomatically": "ON_LOAD",
+      "fallbackToCacheTimeout": 0,
+      "url": "https://u.expo.dev/88af70c7-f822-49b4-8572-1fb698b71413"
     },
     "assetBundlePatterns": [
       "**/*"
@@ -22,6 +24,15 @@
     },
     "android": {
       "package": "com.samux_inc.quizapp"
-    }
+    },
+    "extra": {
+      "eas": {
+        "projectId": "88af70c7-f822-49b4-8572-1fb698b71413"
+      }
+    },
+    "runtimeVersion": "1.2.0",
+    "plugins": [
+      "expo-secure-store"
+    ]
   }
 }

@@ -21,4 +21,5 @@ README.md
 ```bash
 npm install
 expo start
+eas update --branch preview --message "Actualización de contenido o UI"
 ```
