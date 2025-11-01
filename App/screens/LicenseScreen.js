@@ -1,4 +1,6 @@
 // App/screens/LicenseScreen.js
+// Pantalla de activación limpia y reactiva
+
 import React, { useState } from "react";
 import {
   View,
@@ -12,7 +14,6 @@ import {
   Platform,
   Alert,
 } from "react-native";
-import { LinearGradient } from "expo-linear-gradient";
 import { activateLicense } from "../services/licenseService";
 
 export default function LicenseScreen({ onSuccess }) {
@@ -22,7 +23,7 @@ export default function LicenseScreen({ onSuccess }) {
 
   const handleActivate = async () => {
     if (!license.trim()) {
-      setError("Por favor, ingresa tu código de licencia.");
+      setError("Por favor ingresa tu código de licencia.");
       return;
     }
     setLoading(true);
@@ -30,7 +31,7 @@ export default function LicenseScreen({ onSuccess }) {
     try {
       const result = await activateLicense(license.trim());
       if (result.ok) {
-        Alert.alert("Activación exitosa", "Licencia activada correctamente.");
+        Alert.alert("Activación exitosa", "Tu licencia fue activada correctamente.");
         onSuccess && onSuccess();
       } else {
         Alert.alert("Error", result.error || "No se pudo activar la licencia.");
@@ -43,83 +44,42 @@ export default function LicenseScreen({ onSuccess }) {
     }
   };
 
-  if (loading) {
+  if (loading)
     return (
-      <LinearGradient
-        colors={["#000", "#300"]}
-        style={{ flex: 1, justifyContent: "center", alignItems: "center" }}
-      >
-        <ActivityIndicator size="large" color="#ff4444" />
-        <Text style={{ marginTop: 10, color: "#fff" }}>Validando licencia...</Text>
-      </LinearGradient>
+      <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
+        <ActivityIndicator size="large" />
+        <Text style={{ marginTop: 10 }}>Validando licencia...</Text>
+      </View>
     );
-  }
 
   return (
     <KeyboardAvoidingView
       behavior={Platform.OS === "ios" ? "padding" : undefined}
-      style={{ flex: 1 }}
+      style={{ flex: 1, backgroundColor: "#000" }}
     >
       <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-        <LinearGradient
-          colors={["#000", "#600"]}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={{
-            flex: 1,
-            justifyContent: "center",
-            alignItems: "center",
-            padding: 24,
-          }}
-        >
-          <View
+        <View style={{ padding: 24, justifyContent: "center", flex: 1 }}>
+          <Text style={{ fontSize: 22, fontWeight: "700", textAlign: "center", color: "#fff", marginBottom: 12 }}>
+            Activar licencia
+          </Text>
+          <TextInput
+            placeholder="Código de licencia"
+            placeholderTextColor="#777"
+            value={license}
+            onChangeText={setLicense}
+            autoCapitalize="none"
             style={{
-              backgroundColor: "rgba(25,25,25,0.85)",
-              borderRadius: 12,
-              padding: 24,
-              width: "100%",
-              maxWidth: 400,
-              shadowColor: "#ff0000",
-              shadowOpacity: 0.3,
-              shadowRadius: 8,
-              elevation: 5,
+              borderWidth: 1,
+              borderColor: "#444",
+              padding: 12,
+              borderRadius: 8,
+              marginBottom: 12,
+              color: "#fff",
             }}
-          >
-            <Text
-              style={{
-                fontSize: 22,
-                fontWeight: "700",
-                textAlign: "center",
-                marginBottom: 12,
-                color: "#fff",
-              }}
-            >
-              Activar licencia
-            </Text>
-            <TextInput
-              placeholder="Código de licencia"
-              placeholderTextColor="#aaa"
-              value={license}
-              onChangeText={setLicense}
-              autoCapitalize="none"
-              style={{
-                borderWidth: 1,
-                borderColor: "#ff4444",
-                backgroundColor: "#111",
-                color: "#fff",
-                padding: 12,
-                borderRadius: 8,
-                marginBottom: 12,
-              }}
-            />
-            <Button title="Activar" color="#b40000" onPress={handleActivate} />
-            {error ? (
-              <Text style={{ color: "#ff6666", marginTop: 10, textAlign: "center" }}>
-                {error}
-              </Text>
-            ) : null}
-          </View>
-        </LinearGradient>
+          />
+          <Button title="Activar" color="#b91c1c" onPress={handleActivate} />
+          {error ? <Text style={{ color: "#f33", marginTop: 10 }}>{error}</Text> : null}
+        </View>
       </TouchableWithoutFeedback>
     </KeyboardAvoidingView>
   );

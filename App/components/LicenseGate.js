@@ -1,8 +1,6 @@
 // App/components/LicenseGate.js
-// LicenseGate (PRO)
-// - revalidación cada 15s
-// - modo offline: tolerancia 45 minutos
-// - escucha pushInvalidate para invalidación instantánea
+// Restaurado y mejorado: confía en token local, valida cada 30 s, offline 45 min
+
 import React, { useEffect, useState, useRef } from "react";
 import { View, ActivityIndicator, Alert, AppState } from "react-native";
 import LicenseScreen from "../screens/LicenseScreen";
@@ -21,40 +19,32 @@ export default function LicenseGate({ children }) {
   const listenerRef = useRef(null);
   const appState = useRef(AppState.currentState);
 
-  const OFFLINE_TOLERANCE_MS = 45 * 60 * 1000; // 45 minutes
+  const OFFLINE_TOLERANCE_MS = 45 * 60 * 1000;
 
-  // initial check
+  // --- Chequeo inicial ---
   useEffect(() => {
     let mounted = true;
     const init = async () => {
       try {
-        const saved = await getLicenseToken();
-        if (!saved) {
-          if (mounted) setAuthorized(false);
-          return;
-        }
-
-        const res = await validateLicenseOnlineDetailed();
-        if (res.valid) {
+        const token = await getLicenseToken();
+        if (token) {
           if (mounted) {
             setAuthorized(true);
             setLastValidTime(Date.now());
           }
-        } else {
-          // if offline or network error allow grace period
-          if (res.reason === "error") {
-            const prev = Date.now();
-            if (mounted) {
-              setAuthorized(true);
-              setLastValidTime(prev);
+          // validación silenciosa
+          setTimeout(async () => {
+            const res = await validateLicenseOnlineDetailed();
+            if (!res.valid && res.reason !== "error") {
+              await clearLicense();
+              if (mounted) setAuthorized(false);
             }
-          } else {
-            // invalid for other reasons
-            if (mounted) setAuthorized(false);
-          }
+          }, 2000);
+        } else {
+          if (mounted) setAuthorized(false);
         }
       } catch (e) {
-        console.log("init license check error", e);
+        console.warn("init license error:", e);
         if (mounted) setAuthorized(false);
       } finally {
         if (mounted) setLoading(false);
@@ -64,26 +54,29 @@ export default function LicenseGate({ children }) {
     return () => (mounted = false);
   }, []);
 
-  // attach pushInvalidate listener for local token
+  // --- Escucha pushInvalidate ---
   useEffect(() => {
-    let mounted = true;
+    let active = true;
     const attach = async () => {
       const token = await getLicenseToken();
       if (!token) return;
       listenerRef.current = attachPushInvalidateListener(token, async () => {
         await clearLicense();
-        Alert.alert("Licencia desactivada", "Tu licencia fue desactivada por el administrador.");
-        setAuthorized(false);
+        if (active) {
+          Alert.alert("Licencia desactivada", "Tu licencia fue desactivada por el administrador.");
+          setAuthorized(false);
+        }
       });
     };
     attach();
     return () => {
-      if (listenerRef.current && typeof listenerRef.current === "function") listenerRef.current();
-      mounted = false;
+      active = false;
+      if (listenerRef.current && typeof listenerRef.current === "function")
+        listenerRef.current();
     };
   }, []);
 
-  // periodic 15s validation
+  // --- Validación periódica ---
   useEffect(() => {
     if (authorized) {
       intervalRef.current = setInterval(async () => {
@@ -91,17 +84,11 @@ export default function LicenseGate({ children }) {
           const res = await validateLicenseOnlineDetailed();
           if (res.valid) {
             setLastValidTime(Date.now());
-            // stay authorized
           } else {
-            // if reason is network error, check offline tolerance
             if (res.reason === "error") {
               const elapsed = lastValidTime ? Date.now() - lastValidTime : Infinity;
-              if (elapsed <= OFFLINE_TOLERANCE_MS) {
-                // still allow in offline grace
-                return;
-              }
+              if (elapsed <= OFFLINE_TOLERANCE_MS) return;
             }
-            // otherwise invalidate
             await clearLicense();
             Alert.alert("Licencia inválida", "Tu licencia ha sido revocada o ya no es válida.");
             setAuthorized(false);
@@ -109,19 +96,15 @@ export default function LicenseGate({ children }) {
         } catch (e) {
           console.warn("periodic validation error", e);
         }
-      }, 15 * 1000);
+      }, 30 * 1000);
     }
-
-    return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
-    };
+    return () => intervalRef.current && clearInterval(intervalRef.current);
   }, [authorized, lastValidTime]);
 
-  // app state listener to trigger immediate re-check on resume
+  // --- Revalidar al volver a la app ---
   useEffect(() => {
     const sub = AppState.addEventListener("change", async (next) => {
       if (appState.current.match(/inactive|background/) && next === "active") {
-        // app resumed, force a validation
         try {
           const res = await validateLicenseOnlineDetailed();
           if (res.valid) {
@@ -140,17 +123,15 @@ export default function LicenseGate({ children }) {
     return () => sub.remove();
   }, []);
 
-  if (loading) {
+  if (loading)
     return (
       <View style={{ flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: "#000" }}>
         <ActivityIndicator size="large" color="#b91c1c" />
       </View>
     );
-  }
 
-  if (!authorized) {
+  if (!authorized)
     return <LicenseScreen onSuccess={() => { setAuthorized(true); setLastValidTime(Date.now()); }} />;
-  }
 
   return children;
 }

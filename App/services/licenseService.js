@@ -1,147 +1,214 @@
-// LicenseService.js — versión estable con notificaciones push y compatibilidad Android/iOS
+// App/services/licenseService.js
+// InsQuiz - License Service (versión actualizada)
+// Maneja almacenamiento local, logs, validación periódica y pushInvalidate
 
-import { db } from "../firebase/firebaseConfig";
-import { ref, get, update, set, child } from "firebase/database";
 import * as SecureStore from "expo-secure-store";
-import Constants from "expo-constants";
 import * as Application from "expo-application";
-import * as Device from "expo-device";
-import { Platform } from "react-native";
-import { registerPushToken } from "./notificationService"; // ✅ integración push
+import Constants from "expo-constants";
+import { initializeApp } from "firebase/app";
+import {
+  getDatabase,
+  ref,
+  get,
+  child,
+  update,
+  push,
+  set,
+  onValue,
+} from "firebase/database";
+import { getAuth, signInWithEmailAndPassword } from "firebase/auth";
 
-const APP_ID = Constants.expoConfig?.extra?.appId || "insquiz-app";
+// ---------- FIREBASE CONFIG ----------
+const firebaseConfig = {
+  apiKey: "AIzaSyCGFQPk4idrDgFpl1f0ixKF7D63vLYjZGA",
+  authDomain: "insquiz-admin.firebaseapp.com",
+  databaseURL: "https://insquiz-admin-default-rtdb.firebaseio.com",
+  projectId: "insquiz-admin",
+  storageBucket: "insquiz-admin.firebasestorage.app",
+  messagingSenderId: "236979447253",
+  appId: "1:236979447253:web:08c9075dbfa1183fa9095c",
+};
 
-// ✅ Identificador único de dispositivo, compatible Android e iOS
-async function getDeviceId() {
-  try {
-    if (Platform.OS === "android") {
-      return Application.androidId || Device.deviceName || "android_device";
-    } else if (Platform.OS === "ios") {
-      const iosId = await Application.getIosIdForVendorAsync();
-      return iosId || Device.deviceName || "ios_device";
-    } else {
-      return "unknown_device";
+const app = initializeApp(firebaseConfig);
+const db = getDatabase(app);
+const auth = getAuth(app);
+
+// ---------- CREDENCIALES DE SERVICIO ----------
+const SERVICE_EMAIL = "system-reader@insquiz.app";
+const SERVICE_PASS = "123456insquiz";
+
+async function ensureAuth() {
+  if (!auth.currentUser) {
+    try {
+      await signInWithEmailAndPassword(auth, SERVICE_EMAIL, SERVICE_PASS);
+      console.log("✅ Autenticado como lector del sistema");
+    } catch (err) {
+      console.error("❌ Error de autenticación:", err.message);
     }
-  } catch (e) {
-    console.warn("Error obteniendo ID de dispositivo:", e.message);
-    return "unknown_device";
   }
 }
 
-// 🔐 Guardar licencia localmente
-export async function saveLicenseToken(licenseKey) {
+// ---------- ALMACENAMIENTO LOCAL ----------
+export async function saveLicenseToken(token) {
+  await SecureStore.setItemAsync("licenseToken", token);
+}
+
+export async function getLicenseToken() {
+  return await SecureStore.getItemAsync("licenseToken");
+}
+
+export async function clearLicense() {
+  await SecureStore.deleteItemAsync("licenseToken");
+}
+
+// ---------- FIRMA DEL DISPOSITIVO ----------
+function getDeviceSignature() {
+  const id = Application.androidId || Constants.installationId || "unknown-id";
+  const name =
+    (Constants.expoConfig && Constants.expoConfig.name) ||
+    Constants.deviceName ||
+    "unknown-device";
+  return `${id}::${name}`;
+}
+
+// ---------- REGISTRO DE LOGS ----------
+async function pushLog(licenseKey, action, extra = {}) {
   try {
-    await SecureStore.setItemAsync(`${APP_ID}_license`, licenseKey);
+    await ensureAuth();
+    const logRef = ref(db, `licenses/${licenseKey}/logs`);
+    const entry = {
+      action,
+      device: getDeviceSignature(),
+      date: new Date().toISOString(),
+      ...extra,
+    };
+    await push(logRef, entry);
   } catch (e) {
-    console.warn("Error guardando licencia:", e);
+    console.warn("[pushLog]", e.message || e);
   }
 }
 
-// 📦 Obtener licencia guardada
-export async function getSavedLicense() {
-  try {
-    return await SecureStore.getItemAsync(`${APP_ID}_license`);
-  } catch (e) {
-    console.warn("Error leyendo licencia local:", e);
-    return null;
-  }
-}
-
-// 🧹 Borrar licencia guardada
-export async function clearSavedLicense() {
-  try {
-    await SecureStore.deleteItemAsync(`${APP_ID}_license`);
-  } catch (e) {
-    console.warn("Error limpiando licencia local:", e);
-  }
-}
-
-// 🔍 Validar licencia en Firebase
-export async function validateLicenseOnline(licenseKey) {
-  try {
-    const snap = await get(child(ref(db), `licenses/${licenseKey}`));
-    if (!snap.exists()) return { ok: false, error: "Licencia no encontrada" };
-
-    const data = snap.val();
-    if (!data.active) return { ok: false, error: "Licencia inactiva" };
-
-    if (data.expiresAt && data.expiresAt !== "indefinida") {
-      const exp = new Date(data.expiresAt);
-      if (exp <= new Date()) {
-        return { ok: false, error: "Licencia expirada" };
-      }
-    }
-
-    return { ok: true, data };
-  } catch (e) {
-    console.error("Error validando licencia:", e);
-    return { ok: false, error: "Error de conexión" };
-  }
-}
-
-// ⚙️ Activar licencia + registrar dispositivo + notificaciones push
+// ---------- ACTIVAR LICENCIA ----------
 export async function activateLicense(licenseKey) {
-  const deviceId = await getDeviceId();
-
   try {
-    const licenseRef = ref(db, `licenses/${licenseKey}`);
-    const snap = await get(licenseRef);
-    if (!snap.exists()) return { ok: false, error: "Licencia no encontrada" };
+    await ensureAuth();
 
+    const snap = await get(child(ref(db), `licenses/${licenseKey}`));
+    if (!snap.exists()) return { ok: false, error: "Licencia no encontrada." };
     const data = snap.val();
 
-    if (!data.active) return { ok: false, error: "Licencia inactiva" };
+    // --- Validación de estado ---
+    if (!data.active) {
+      await pushLog(licenseKey, "activate_attempt_inactive");
+      return { ok: false, error: "Licencia inactiva o suspendida." };
+    }
 
-    const devices = data.devices || {};
-    const deviceCount = Object.keys(devices).length;
-    const maxDevices = data.maxDevices || 1;
+    // --- Dispositivo actual ---
+    const deviceSignature = getDeviceSignature();
+    const deviceId = Application.androidId || Constants.installationId || "unknown-device";
 
-    // Ya registrado
-    if (devices[deviceId]) {
+    // --- Garantizar arrays válidos ---
+    const devices = Array.isArray(data.devices) ? data.devices : [];
+    const deviceSignatures = Array.isArray(data.deviceSignatures)
+      ? data.deviceSignatures
+      : [];
+
+    // --- ¿Ya está registrado este dispositivo? ---
+    const isRegistered =
+      devices.includes(deviceId) || deviceSignatures.includes(deviceSignature);
+
+    if (isRegistered) {
       await saveLicenseToken(licenseKey);
+      await pushLog(licenseKey, "activate_success_existing");
       return { ok: true, data };
     }
 
-    if (deviceCount >= maxDevices)
-      return { ok: false, error: "Máximo de dispositivos alcanzado" };
+    // --- Verificar límite de dispositivos ---
+    const total = devices.length + deviceSignatures.length;
+    const max = data.maxDevices || 1;
+    if (total >= max) {
+      await pushLog(licenseKey, "activate_fail_max_devices", { count: total });
+      return {
+        ok: false,
+        error: `Esta licencia alcanzó el número máximo (${max}) de dispositivos permitidos.`,
+      };
+    }
 
-    // Registrar nuevo dispositivo
-    const now = new Date().toISOString();
-    await update(licenseRef, {
-      [`devices/${deviceId}`]: {
-        registeredAt: now,
-        signature: Device.deviceName || "unknown",
-      },
+    // --- Registrar nuevo dispositivo ---
+    const newDevices = [...devices, deviceId];
+    const newSignatures = [...deviceSignatures, deviceSignature];
+
+    await update(ref(db, `licenses/${licenseKey}`), {
+      devices: newDevices,
+      deviceSignatures: newSignatures,
     });
 
     await saveLicenseToken(licenseKey);
+    await pushLog(licenseKey, "activate_success_new");
 
-    // ✅ Registrar token de notificación push
-    try {
-      await registerPushToken(licenseKey);
-      console.log("📲 Token push registrado correctamente.");
-    } catch (e) {
-      console.warn("⚠️ No se pudo registrar token push:", e.message);
-    }
-
-    console.log(`✅ Dispositivo ${deviceId} registrado en licencia ${licenseKey}`);
     return { ok: true, data };
-  } catch (e) {
-    console.error("Error activando licencia:", e);
-    return { ok: false, error: "Error de conexión" };
+  } catch (error) {
+    console.error("Error activating license:", error);
+    return { ok: false, error: error.message || "Error desconocido al activar licencia." };
   }
 }
 
-// ❌ Desactivar dispositivo
-export async function deactivateDevice(licenseKey) {
+
+// ---------- VALIDAR LICENCIA ----------
+export async function validateLicenseOnlineDetailed() {
   try {
-    const deviceId = await getDeviceId();
-    const deviceRef = ref(db, `licenses/${licenseKey}/devices/${deviceId}`);
-    await set(deviceRef, null);
-    await clearSavedLicense();
-    return { ok: true };
+    await ensureAuth();
+    const licenseKey = await getLicenseToken();
+    if (!licenseKey) return { valid: false, reason: "no_local_token" };
+
+    const snap = await get(child(ref(db), `licenses/${licenseKey}`));
+    if (!snap.exists()) return { valid: false, reason: "not_found" };
+
+    const data = snap.val();
+
+    if (data.pushInvalidate) {
+      await update(ref(db, `licenses/${licenseKey}`), { pushInvalidate: false });
+      await pushLog(licenseKey, "invalidate_pushed");
+      return { valid: false, reason: "invalidated_by_admin" };
+    }
+
+    if (!data.active) return { valid: false, reason: "inactive" };
+
+    const deviceSignature = getDeviceSignature();
+    const deviceId = Application.androidId || Constants.installationId || "unknown-device";
+    const authorized =
+      (data.deviceSignatures || []).includes(deviceSignature) ||
+      (data.devices || []).includes(deviceId);
+
+    if (!authorized) return { valid: false, reason: "device_not_authorized" };
+
+    await pushLog(licenseKey, "validate_ok");
+    return { valid: true };
+  } catch (error) {
+    console.error("validateLicenseOnlineDetailed error:", error);
+    return { valid: false, reason: "error", error: error.message };
+  }
+}
+
+export async function validateLicenseOnline() {
+  const res = await validateLicenseOnlineDetailed();
+  return res.valid === true;
+}
+
+// ---------- ESCUCHA PUSH INVALIDATE ----------
+export function attachPushInvalidateListener(licenseKey, onInvalidate) {
+  try {
+    ensureAuth();
+    const node = ref(db, `licenses/${licenseKey}/pushInvalidate`);
+    return onValue(node, (snap) => {
+      const val = snap.val();
+      if (val) {
+        update(ref(db, `licenses/${licenseKey}`), { pushInvalidate: false }).catch(() => {});
+        onInvalidate && onInvalidate();
+      }
+    });
   } catch (e) {
-    console.error("Error al desactivar dispositivo:", e);
-    return { ok: false };
+    console.warn("attachPushInvalidateListener:", e.message || e);
+    return null;
   }
 }

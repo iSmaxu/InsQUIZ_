@@ -217,8 +217,8 @@ export default function HomeScreen({ navigation }) {
           width: "90%",
         }}
       >
-        Las preguntas se actualizan automáticamente al finalizar un quiz o al presionar el botón de
-        actualización OTA.
+        Aplicacion diseñada y desarrollada por Ivan Samuel Perez Torenegra.
+        copyright © 2025. Todos los derechos reservados.
       </Text>
 
       {/* 🚪 BOTÓN DE CIERRE DE SESIÓN */}
