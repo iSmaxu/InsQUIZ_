@@ -1,7 +1,7 @@
 name: Build Android APK (Expo Local)
 
 on:
-  workflow_dispatch:  # te permite lanzarlo manualmente
+  workflow_dispatch:
   push:
     branches:
       - main
@@ -31,7 +31,7 @@ jobs:
           ./gradlew assembleRelease
 
       - name: Upload APK artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: InsQuiz-APK
           path: android/app/build/outputs/apk/release/app-release.apk
